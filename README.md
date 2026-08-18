@@ -40,7 +40,7 @@ python3 M3U8-Inspector.py -u 'C:/some/path/to/m3u8/playlist.m3u8'
 A quick and simple way to check if a M3U8 source is a playlist or master is
 
 ```bash
-python M3U8-Inspector.py -u 'https://some-m3u8-url.com/playlist.m3u8' --is-master
+python3 M3U8-Inspector.py -u 'https://some-m3u8-url.com/playlist.m3u8' --is-master
 ```
 
 ### Downloader
@@ -50,7 +50,7 @@ M3U8-Inspector allows for a quick and easy way to download the segments of playl
 This command will download the segments of the M3U8 playlist and output them in the directory `./output` along with the **playlist.m3u8** *(This only works on URLS)*.
 
 ```bash
-python M3U8-Inspector.py -u 'https://some-m3u8-url.com/playlist.m3u8' --download
+python3 M3U8-Inspector.py -u 'https://some-m3u8-url.com/playlist.m3u8' --download
 ```
 
 ### Streamer
