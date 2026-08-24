@@ -3,6 +3,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
+from sys import exit
 from time import sleep
 from typing import TypedDict
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
@@ -35,8 +36,9 @@ def _download_hls_source():
 
 
 class M3u8Parser:
-    def __init__(self, source: str):
+    def __init__(self, source: str, headers: str):
         self.source: str = source
+        self.headers: str
 
         self.__content: str = ""
         self.__lines: list[str] = []
@@ -48,7 +50,11 @@ class M3u8Parser:
         self.__timestamps: list[str] = []
 
     def parse(self):
-        response = requests.get(self.source, headers=HEADERS)
+        if not is_m3u8_extension(self.source):
+            print(f"Invalid source type: {self.source}")
+            exit()
+
+        response = requests.get(self.source, headers=self.headers)
         response.raise_for_status()
         self.__content = response.text
         self.__lines = self.__content.splitlines()
