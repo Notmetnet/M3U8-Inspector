@@ -1,160 +1,12 @@
 import mimetypes
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path, PurePosixPath
-from sys import exit
-from time import sleep
-from typing import TypedDict
+from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 import requests
 
 HLS_URL = "https://cdn.jsdelivr.net/npm/hls.js@latest"
-
-StreamInfo = TypedDict(
-    "StreamInfo",
-    {"BANDWIDTH": str, "RESOLUTION": str, "NAME": str, "M3U8-LINK": str},
-    total=False,
-)
-
-HEADERS = {
-    "Referer": "https://www.miruro.to/",
-    "Origin": "https://www.miruro.to",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 OPR/130.0.0.0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-}
-
-
-def is_hls_source_downloaded() -> bool:
-    hls_path = os.path.join("modules", "hls.js")
-    return os.path.exists(hls_path)
-
-
-def _download_hls_source():
-    pass
-
-
-class M3u8Parser:
-    def __init__(self, source: str, headers: str):
-        self.source: str = source
-        self.headers: str
-
-        self.__content: str = ""
-        self.__lines: list[str] = []
-        self.__resolution: str = ""
-        self.__is_master: bool = True
-
-        self.__streams: list[StreamInfo] = []
-        self.__segments: list[str] = []
-        self.__timestamps: list[str] = []
-
-    def parse(self):
-        if not is_m3u8_extension(self.source):
-            print(f"Invalid source type: {self.source}")
-            exit()
-
-        response = requests.get(self.source, headers=self.headers)
-        response.raise_for_status()
-        self.__content = response.text
-        self.__lines = self.__content.splitlines()
-        self.parse_lines()
-
-        return self.__content
-
-    def parse_lines(self):
-        self.__streams = []
-        segments: list[str] = []
-        timestamps: list[str] = []
-
-        def parse_stream_inf(line: str, m3u8_stream_url: str) -> StreamInfo:
-            attrs = line.split(":", 1)[1]
-            parts = attrs.split(",")
-
-            data: StreamInfo = {}
-            for part in parts:
-                if "=" in part:
-                    key, value = part.split("=", 1)
-                    data[key] = value.strip('"')
-
-            data["M3U8-LINK"] = m3u8_stream_url
-            return data
-
-        for index, line in enumerate(self.__lines):
-            if line.startswith("#EXT-X-STREAM-INF:") and index + 1 < len(self.__lines):
-                next_line = self.__lines[index + 1].strip()
-                info = parse_stream_inf(line, next_line)
-                self.__streams.append(info)
-
-            self.__is_master = bool(self.__streams)
-
-            if line.startswith("http"):
-                segments.append(line)
-
-            if line.startswith("#EXTINF:"):
-                formatted_line = line.split(":", 1)[1].replace(",", "")
-                timestamps.append(formatted_line)
-
-        self.__segments = segments
-        self.__timestamps = timestamps
-
-    def is_master(self):
-        return self.__is_master
-
-    def get_segments(self) -> list[str]:
-        return self.__segments
-
-    def get_streams(self) -> list[StreamInfo]:
-        return self.__streams
-
-    def get_timestamps(self):
-        return self.__timestamps
-
-    def get_content(self) -> str:
-        return self.__content
-
-
-class M3u8Downloader:
-    def __init__(self, timestamps: list[str], segments: list[str], output: str):
-        self.__timestamps = timestamps
-        self.__segments = segments
-        self.output: str = output
-        self.__len = len(self.__segments)
-
-    def download_segments(self, max_workers: int = 5, timeout: int = 1):
-        if len(self.__segments) != len(self.__timestamps):
-            raise ValueError("Timestamps and segments need to have the same length")
-
-        def download_one(i: int, segment: str):
-            sleep(timeout)
-            response = requests.get(segment, headers=HEADERS)
-            print(f"Downloading {segment}")
-            os.makedirs(self.output, exist_ok=True)
-
-            try:
-                segment_name = f"seg_{i:06d}.ts"
-                output_file = os.path.join(self.output, segment_name)
-
-                with open(output_file, "wb") as fh:
-                    _ = fh.write(response.content)
-
-            except Exception as e:
-                print(e)
-
-        with ThreadPoolExecutor(max_workers) as executor:
-            futures = [
-                executor.submit(download_one, i, segment)
-                for i, segment in enumerate(self.__segments)
-            ]
-            for future in as_completed(futures):
-                future.result()
-
-        local_segments = [f"seg_{i:06d}.ts" for i in range(len(self.__segments))]
-        playlist_path = os.path.join(self.output, "playlist.m3u8")
-        build_m3u8_playlist(
-            self.__timestamps, local_segments, output_path=playlist_path
-        )
-        return playlist_path
 
 
 class M3u8StreamPage:
@@ -190,6 +42,115 @@ video.src = "/playlist.m3u8";
             return f"<script>{hls_script}</script>"
         else:
             return f"<script src='{HLS_URL}'></script>"
+
+
+class M3u8Streamer:
+    def __init__(self, source: str, headers: dict[str, str]):
+        self.source: str = source
+        self.headers: dict[str, str] = headers
+
+    class HTTPRequestHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            query = parse_qs(parsed.query)
+
+            if parsed.path == "/":
+                return self._serve_index()
+
+            if parsed.path == "/playlist.m3u8":
+                upstream_url = query.get("url", [self.server.upstream_url])[0]
+                return self._serve_playlist(upstream_url)
+
+            if parsed.path == "/segment":
+                segment_url = query.get("url", [None])[0]
+                if not segment_url:
+                    self.send_error(400, "Missing segment url")
+                    return
+                return self._proxy_binary(unquote(segment_url))
+
+            self.send_error(404)
+
+        def _serve_index(self):
+            index_html = Path(__file__).resolve().parent.parent / "index.html"
+
+            if index_html.exists():
+                html = index_html.read_text(encoding="utf-8")
+            else:
+                html = M3u8StreamPage().HTML
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            _ = self.wfile.write(html.encode("utf-8"))
+
+        def _serve_playlist(self, upstream_url: str):
+            resp = requests.get(
+                upstream_url,
+                headers=self.server.upstream_headers,
+                timeout=30,
+            )
+            resp.raise_for_status()
+
+            rewritten_lines: list[str] = []
+            for line in resp.text.splitlines():
+                if line and not line.startswith("#"):
+                    absolute_url = urljoin(upstream_url, line)
+                    proxy_url = f"/segment?url={quote(absolute_url, safe='')}"
+                    if absolute_url.endswith(".m3u8"):
+                        proxy_url = f"/playlist.m3u8?url={quote(absolute_url, safe='')}"
+                    rewritten_lines.append(proxy_url)
+                else:
+                    rewritten_lines.append(line)
+
+            body = "\n".join(rewritten_lines) + "\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.apple.mpegurl")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            _ = self.wfile.write(body.encode("utf-8"))
+
+        def _proxy_binary(self, upstream_url: str):
+            resp = requests.get(
+                upstream_url,
+                headers=self.server.upstream_headers,
+                stream=True,
+                timeout=30,
+            )
+
+            self.send_response(resp.status_code)
+            self.send_header(
+                "Content-Type",
+                resp.headers.get("Content-Type", "video/MP2T"),
+            )
+            self.end_headers()
+
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    _ = self.wfile.write(chunk)
+
+    def stream(self):
+        server_address = ("", 8989)
+        if not is_hls_source_downloaded():
+            _download_hls_source()
+        httpd = ThreadingHTTPServer(server_address, self.HTTPRequestHandler)
+        httpd.upstream_url = self.source
+        httpd.upstream_headers = self.headers
+
+        print("Server running on http://localhost:8989")
+
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            httpd.server_close()
+
+
+def is_hls_source_downloaded() -> bool:
+    hls_path = os.path.join("modules", "hls.js")
+    return os.path.exists(hls_path)
+
+
+def _download_hls_source():
+    pass
 
 
 class LocalM3u8Streamer:
@@ -437,130 +398,3 @@ class LocalM3u8Streamer:
 
         finally:
             httpd.server_close()
-
-
-class M3u8Streamer:
-    def __init__(self, source: str, headers: dict[str, str]):
-        self.source: str = source
-        self.headers: dict[str, str] = headers
-
-    class HTTPRequestHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            parsed = urlparse(self.path)
-            query = parse_qs(parsed.query)
-
-            if parsed.path == "/":
-                return self._serve_index()
-
-            if parsed.path == "/playlist.m3u8":
-                upstream_url = query.get("url", [self.server.upstream_url])[0]
-                return self._serve_playlist(upstream_url)
-
-            if parsed.path == "/segment":
-                segment_url = query.get("url", [None])[0]
-                if not segment_url:
-                    self.send_error(400, "Missing segment url")
-                    return
-                return self._proxy_binary(unquote(segment_url))
-
-            self.send_error(404)
-
-        def _serve_index(self):
-            index_html = Path(__file__).resolve().parent.parent / "index.html"
-
-            if index_html.exists():
-                html = index_html.read_text(encoding="utf-8")
-            else:
-                html = M3u8StreamPage().HTML
-
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            _ = self.wfile.write(html.encode("utf-8"))
-
-        def _serve_playlist(self, upstream_url: str):
-            resp = requests.get(
-                upstream_url,
-                headers=self.server.upstream_headers,
-                timeout=30,
-            )
-            resp.raise_for_status()
-
-            rewritten_lines: list[str] = []
-            for line in resp.text.splitlines():
-                if line and not line.startswith("#"):
-                    absolute_url = urljoin(upstream_url, line)
-                    proxy_url = f"/segment?url={quote(absolute_url, safe='')}"
-                    if absolute_url.endswith(".m3u8"):
-                        proxy_url = f"/playlist.m3u8?url={quote(absolute_url, safe='')}"
-                    rewritten_lines.append(proxy_url)
-                else:
-                    rewritten_lines.append(line)
-
-            body = "\n".join(rewritten_lines) + "\n"
-            self.send_response(200)
-            self.send_header("Content-Type", "application/vnd.apple.mpegurl")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            _ = self.wfile.write(body.encode("utf-8"))
-
-        def _proxy_binary(self, upstream_url: str):
-            resp = requests.get(
-                upstream_url,
-                headers=self.server.upstream_headers,
-                stream=True,
-                timeout=30,
-            )
-
-            self.send_response(resp.status_code)
-            self.send_header(
-                "Content-Type",
-                resp.headers.get("Content-Type", "video/MP2T"),
-            )
-            self.end_headers()
-
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    _ = self.wfile.write(chunk)
-
-    def stream(self):
-        server_address = ("", 8989)
-        if not is_hls_source_downloaded():
-            _download_hls_source()
-        httpd = ThreadingHTTPServer(server_address, self.HTTPRequestHandler)
-        httpd.upstream_url = self.source
-        httpd.upstream_headers = self.headers
-
-        print("Server running on http://localhost:8989")
-
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            httpd.server_close()
-
-
-def is_m3u8_extension(url: str):
-    path = urlparse(url).path
-    suffix = PurePosixPath(path).suffix
-    return suffix == ".m3u8"
-
-
-def build_m3u8_playlist(
-    timestamps: list[str], segments: list[str], output_path: str = "./playlist.m3u8"
-):
-    base_build = """
-#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-MEDIA-SEQUENCE:0
-#EXT-X-TARGETDURATION:20
-"""
-
-    if len(timestamps) != len(segments):
-        raise ValueError("Timestamps and segments should have the same length")
-
-    with open(output_path, "w") as fh:
-        _ = fh.write(base_build)
-        for i in range(len(timestamps)):
-            fh.writelines("#EXTINF:" + str(timestamps[i]) + "," + "\n")
-            fh.writelines(segments[i] + "\n")
-        _ = fh.write("#EXT-X-ENDLIST")

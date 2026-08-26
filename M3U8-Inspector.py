@@ -1,13 +1,8 @@
 import argparse
-import json
 
-from modules.m3u8Parser import (
-    HEADERS,
-    LocalM3u8Streamer,
-    M3u8Downloader,
-    M3u8Parser,
-    M3u8Streamer,
-)
+from modules.M3u8Downloader import M3u8Downloader
+from modules.M3u8Parser import M3u8Parser
+from modules.M3u8Streamer import LocalM3u8Streamer, M3u8Streamer
 
 parser = argparse.ArgumentParser(
     description="Extract and parse M3U8 files and links made easier."
@@ -27,9 +22,7 @@ _ = m3u8_parser.add_argument(
     "-u", "--url", required=True, help="The source of the M3U8 content."
 )
 
-_ = m3u8_parser.add_argument(
-    "-H", "--headers", action="store_true", help="Use custom headers"
-)
+_ = m3u8_parser.add_argument("-H", "--headers", help="Use custom headers")
 
 _ = m3u8_parser.add_argument(
     "-iM",
@@ -92,15 +85,15 @@ _ = downloader.add_argument(
 
 def parse_stream_segments(url: str, local: bool = False):
     if not local:
-        m3u8_parser = M3u8Streamer(source=url, headers=HEADERS)
+        m3u8_parser = M3u8Streamer(source=url, headers={"": ""})
         m3u8_parser.stream()
     else:
         streamer = LocalM3u8Streamer(source=url)
         streamer.stream()
 
 
-def parse_download(url: str):
-    playlist = M3u8Parser(source=url)
+def parse_download(url: str, headers: str):
+    playlist = M3u8Parser(source=url, headers=headers)
     _ = playlist.parse()
 
     if not playlist.is_master():
@@ -126,7 +119,7 @@ class Args(argparse.Namespace):
     stream_local: bool | None = None
     download: bool | None = None
 
-    headers: dict[str, str] | None = None
+    headers: str = ""
     command: str = ""
 
 
@@ -134,13 +127,7 @@ if __name__ == "__main__":
     args = parser.parse_args(namespace=Args())
 
     if args.command == "parse":
-        if not args.headers:
-            headers = {"": ""}
-
-        else:
-            headers = args.headers
-
-        m3u8 = M3u8Parser(source=args.url, headers=headers)
+        m3u8 = M3u8Parser(source=args.url, headers=args.headers)
         _ = m3u8.parse()
 
         if args.is_master:
