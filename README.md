@@ -28,19 +28,19 @@ python3 M3U8-Inspector.py -h
 The URL (or the file) of the M3U8 is required for the parser to work
 
 ```bash
-python3 M3U8-Inspector.py -u 'https://some-m3u8-url.com/playlist.m3u8'
+python3 M3U8-Inspector.py parse -u 'https://some-m3u8-url.com/playlist.m3u8' --list-content
 ```
 
 or 
 
 ```bash
-python3 M3U8-Inspector.py -u 'C:/some/path/to/m3u8/playlist.m3u8'
+python3 M3U8-Inspector.py parse -u 'C:/some/path/to/m3u8/playlist.m3u8' --list-content
 ```
 
 A quick and simple way to check if a M3U8 source is a playlist or master is
 
 ```bash
-python3 M3U8-Inspector.py -u 'https://some-m3u8-url.com/playlist.m3u8' --is-master
+python3 M3U8-Inspector.py parse -u 'https://some-m3u8-url.com/playlist.m3u8' --is-master
 ```
 
 ### Downloader
@@ -50,7 +50,7 @@ M3U8-Inspector allows for a quick and easy way to download the segments of playl
 This command will download the segments of the M3U8 playlist and output them in the directory `./output` along with the **playlist.m3u8** *(This only works on URLS)*.
 
 ```bash
-python3 M3U8-Inspector.py -u 'https://some-m3u8-url.com/playlist.m3u8' --download
+python3 M3U8-Inspector.py download -u 'https://some-m3u8-url.com/playlist.m3u8'
 ```
 
 ### Streamer
@@ -60,18 +60,18 @@ M3U8 sources are streamed via HTTP on a web browser. M3U8 sources can also be st
 The command to stream a URL via is
 
 ```bash
-python3 M3U8-Inspector.py -u 'https://some-m3u8-url.com/playlist.m3u8'  --stream-playlist
+python3 M3U8-Inspector.py stream -u 'https://some-m3u8-url.com/playlist.m3u8' --stream
 ```
 
 To stream already downloaded playlists is
 
 ```bash
-python3 M3U8-Inspector.py -u 'C:/some/path/to/m3u8/playlist.m3u8' --stream-local
+python3 M3U8-Inspector.py stream -u 'C:/some/path/to/m3u8/playlist.m3u8' --stream-local
 ```
 ## Upcoming features
 
-- Stream M3U8 URLs with custom headers
-- More options for the CLI
+- ~~Stream M3U8 URLs with custom headers~~
+- ~~More options for the CLI~~
 - Frontend webpage along side CLI
 - Allow frontend stream pages to altered
 - Allowing multiple M3U8 playlists to be linked together *(Have episode integration)*

@@ -1,3 +1,4 @@
+import os
 from pathlib import PurePosixPath
 from sys import exit
 from typing import TypedDict
@@ -13,9 +14,9 @@ StreamInfo = TypedDict(
 
 
 class M3u8Parser:
-    def __init__(self, source: str, headers: str):
+    def __init__(self, source: str, headers: dict[str, str]):
         self.source: str = source
-        self.headers: str = headers
+        self.headers: dict[str, str] = headers
 
         self.__content: str = ""
         self.__lines: list[str] = []
@@ -31,10 +32,16 @@ class M3u8Parser:
             print(f"Invalid source type: {self.source}")
             exit()
 
-        response = requests.get(self.source, headers=self.headers)
+        if os.path.exists(self.source):
+            with open(self.source, "r", encoding="utf-8") as fh:
+                self.__content = fh.read()
+                self.__lines = self.__content.splitlines()
 
-        self.__content = response.text
-        self.__lines = self.__content.splitlines()
+        else:
+            response = requests.get(self.source, headers=self.headers)
+            self.__content = response.text
+            self.__lines = self.__content.splitlines()
+
         self.parse_lines()
 
         return self.__content

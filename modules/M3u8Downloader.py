@@ -8,10 +8,17 @@ from modules.M3u8Parser import build_m3u8_playlist
 
 
 class M3u8Downloader:
-    def __init__(self, timestamps: list[str], segments: list[str], output: str):
+    def __init__(
+        self,
+        timestamps: list[str],
+        segments: list[str],
+        output: str,
+        headers: dict[str, str],
+    ):
         self.__timestamps = timestamps
         self.__segments = segments
         self.output: str = output
+        self.headers: dict[str, str] = headers
         self.__len = len(self.__segments)
 
     def download_segments(self, max_workers: int = 5, timeout: int = 1):
@@ -20,7 +27,7 @@ class M3u8Downloader:
 
         def download_one(i: int, segment: str):
             sleep(timeout)
-            response = requests.get(segment, headers=HEADERS)
+            response = requests.get(segment, headers=self.headers)
             print(f"Downloading {segment}")
             os.makedirs(self.output, exist_ok=True)
 

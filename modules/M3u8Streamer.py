@@ -2,6 +2,7 @@ import mimetypes
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import override
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 import requests
@@ -45,11 +46,16 @@ video.src = "/playlist.m3u8";
 
 
 class M3u8Streamer:
-    def __init__(self, source: str, headers: dict[str, str]):
+    def __init__(self, source: str, headers: dict[str, str], verbose: bool = False):
         self.source: str = source
         self.headers: dict[str, str] = headers
+        self.verbose: bool = verbose
 
     class HTTPRequestHandler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            if self.server.verbose:
+                super().log_message(format, *args)
+
         def do_GET(self):
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
@@ -130,17 +136,26 @@ class M3u8Streamer:
 
     def stream(self):
         server_address = ("", 8989)
+
         if not is_hls_source_downloaded():
             _download_hls_source()
-        httpd = ThreadingHTTPServer(server_address, self.HTTPRequestHandler)
+
+        httpd = ThreadingHTTPServer(
+            server_address,
+            self.HTTPRequestHandler,
+        )
+
         httpd.upstream_url = self.source
         httpd.upstream_headers = self.headers
+        httpd.verbose = self.verbose
 
         print("Server running on http://localhost:8989")
 
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
+            pass
+        finally:
             httpd.server_close()
 
 
@@ -154,10 +169,15 @@ def _download_hls_source():
 
 
 class LocalM3u8Streamer:
-    def __init__(self, source: Path | str):
+    def __init__(self, source: Path | str, verbose: bool = False):
         self.source: Path | str = Path(source).resolve()
+        self.verbose: bool = verbose
 
     class HTTPRequestHandler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            if self.server.verbose:
+                super().log_message(format, *args)
+
         def do_GET(self):
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
@@ -385,10 +405,13 @@ class LocalM3u8Streamer:
 
         httpd.source = self.source
         httpd.stream_root = self.source.parent
+        httpd.verbose = self.verbose
 
-        print(f"Serving M3U8: {self.source}")
-        print(f"Stream directory: {self.source.parent}")
-        print(f"Open: http://localhost:{port}")
+        if self.verbose:
+            print(f"Serving M3U8: {self.source}")
+            print(f"Stream directory: {self.source.parent}")
+
+        print(f"Streaming on: http://localhost:{port}")
 
         try:
             httpd.serve_forever()
