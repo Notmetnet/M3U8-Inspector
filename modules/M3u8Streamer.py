@@ -165,8 +165,11 @@ def is_hls_source_downloaded() -> bool:
 
 
 def _download_hls_source():
-    pass
-
+    response = requests.get("https://cdn.jsdelivr.net/npm/hls.js@latest")
+    os.makedirs("modules", exist_ok=True)
+    if response.ok:
+        with open(os.path.join("modules", "hls.js"), "w") as f:
+            _ = f.write(response.text)
 
 class LocalM3u8Streamer:
     def __init__(self, source: Path | str, verbose: bool = False):
