@@ -1,6 +1,5 @@
 import os
 from pathlib import PurePosixPath
-from sys import exit
 from typing import TypedDict
 from urllib.parse import urlparse
 
@@ -30,7 +29,6 @@ class M3u8Parser:
     def parse(self):
         if not is_m3u8_extension(self.source):
             print(f"Invalid source type: {self.source}")
-            exit()
 
         if os.path.exists(self.source):
             with open(self.source, "r", encoding="utf-8") as fh:

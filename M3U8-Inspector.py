@@ -1,6 +1,7 @@
 import argparse
 import json
-from sys import exit
+import sys
+from contextlib import redirect_stdout
 
 from modules.M3u8Downloader import M3u8Downloader
 from modules.M3u8Parser import M3u8Parser
@@ -20,6 +21,10 @@ _ = parser.add_argument(
     action="store_true",
     default=False,
     help="Enables verbose logging.",
+)
+
+_ = parser.add_argument(
+    "--stdio", action="store_true", help="Communicate using JSON over stdin/stdout."
 )
 
 subparsers = parser.add_subparsers(dest="command")
@@ -114,14 +119,121 @@ class Args(argparse.Namespace):
     command: str = ""
     verbose: bool = False
     output: str = ""
+    stdio: bool = False
 
 
-if __name__ == "__main__":
-    args = parser.parse_args(namespace=Args())
+def handle_request(request: dict):
+    command = request.get("command")
 
+    headers = request.get("headers", {})
+    verbose = request.get("verbose", False)
+
+    if command == "parse":
+        url = request["url"]
+        operation = request.get("operation", "inspect")
+
+        m3u8 = M3u8Parser(
+            source=url,
+            headers=headers,
+        )
+
+        m3u8.parse()
+
+        if operation == "is_master":
+            return {"is_master": m3u8.is_master()}
+
+        if operation == "list_streams":
+            return {"streams": m3u8.get_streams()}
+
+        if operation == "list_contents":
+            return {"content": m3u8.get_content()}
+
+        # Useful default for the GUI
+        return {
+            "is_master": m3u8.is_master(),
+            "streams": m3u8.get_streams(),
+            "segments": m3u8.get_segments(),
+            "timestamps": m3u8.get_timestamps(),
+        }
+
+    elif command == "download":
+        url = request["url"]
+        output = request.get("output", "./downloaded")
+        max_workers = request.get("max_workers", 5)
+        rate_limit = request.get("rate_limit", 1)
+
+        m3u8 = M3u8Parser(
+            source=url,
+            headers=headers,
+        )
+
+        m3u8.parse()
+
+        if m3u8.is_master():
+            raise ValueError("M3U8 source cannot be a master playlist.")
+
+        M3u8Downloader(
+            segments=m3u8.get_segments(),
+            timestamps=m3u8.get_timestamps(),
+            headers=headers,
+            output=output,
+        ).download_segments(
+            max_workers=max_workers,
+            timeout=rate_limit,
+        )
+
+        return {"output": output}
+
+    else:
+        raise ValueError(f"Unknown command: {command}")
+
+
+def run_stdio():
+    for line in sys.stdin:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        request_id = None
+
+        try:
+            request = json.loads(line)
+
+            request_id = request.get("id")
+
+            # Redirect existing print() calls from your modules
+            # to stderr so they don't corrupt the JSON protocol.
+            with redirect_stdout(sys.stderr):
+                data = handle_request(request)
+
+            response = {
+                "id": request_id,
+                "success": True,
+                "data": data,
+            }
+
+        except Exception as error:
+            response = {
+                "id": request_id,
+                "success": False,
+                "error": str(error),
+            }
+
+        print(
+            json.dumps(response),
+            flush=True,
+        )
+
+
+def run_cli(args: Args):
     if args.command == "parse":
-        m3u8 = M3u8Parser(source=args.url, headers=args.headers)
-        _ = m3u8.parse()
+        m3u8 = M3u8Parser(
+            source=args.url,
+            headers=args.headers,
+        )
+
+        m3u8.parse()
 
         if args.is_master:
             print(m3u8.is_master())
@@ -135,7 +247,6 @@ if __name__ == "__main__":
 
         elif args.list_contents:
             print(m3u8.get_content())
-
     elif args.command == "stream":
         if args.stream:
             m3u8 = M3u8Parser(source=args.url, headers=args.headers)
@@ -155,7 +266,6 @@ if __name__ == "__main__":
 
         if m3u8.is_master():
             print("M3U8 source cannot be a master playlist.")
-            exit()
 
         _ = M3u8Downloader(
             segments=m3u8.get_segments(),
@@ -163,3 +273,12 @@ if __name__ == "__main__":
             headers=args.headers,
             output=args.output,
         ).download_segments(max_workers=args.max_workers, timeout=args.rate_limit)
+
+
+if __name__ == "__main__":
+    args = parser.parse_args(namespace=Args())
+
+    if args.stdio:
+        run_stdio()
+    else:
+        run_cli(args)
